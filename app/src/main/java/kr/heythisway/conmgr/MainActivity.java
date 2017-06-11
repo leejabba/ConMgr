@@ -1,75 +1,70 @@
 package kr.heythisway.conmgr;
 
+import android.app.ProgressDialog;
 import android.os.Bundle;
-import android.os.NetworkOnMainThreadException;
-import android.os.StrictMode;
+import android.os.Handler;
+import android.os.Message;
 import android.support.v7.app.AppCompatActivity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
+/**
+ * # 28.1.4 비동기 다운로드
+ *
+ * 만약 웹페이지를 포맷팅해서 출력하고 싶다면 네트워크 관련 코드를
+ * 작성할 필요 없이 WebView 위젯을 사용하는 것이
+ * 훨씬 간편하다.
+ */
 
 public class MainActivity extends AppCompatActivity {
+    ProgressDialog progressDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        /* 기어코 메인 스레드에서 네트워크 입출력을 하려면
-        스트릭트 모드를 약간 풀어주면 가능은 하다.*/
-        StrictMode.ThreadPolicy pol = new StrictMode.ThreadPolicy.Builder().permitNetwork().build();
-        StrictMode.setThreadPolicy(pol);
-
         Button down = (Button) findViewById(R.id.down);
         down.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                String html;
-                html = DownloadHtml("http://www.google.com");
-                TextView result = (TextView) findViewById(R.id.result);
-                result.setText(html);
+                // 프로그레스 처리 과정을 대화상자로 알려준다. (Context, 창 제목, 내용)
+                progressDialog = ProgressDialog.show(MainActivity.this, "기다리세요", "다운로드 중입니다...");
+                // 스레드로 다운로드 받을 대상 주소를 넘긴다.
+                DownThread thread = new DownThread("http://www.google.com");
+                thread.start();
             }
         });
     }
 
-    private String DownloadHtml(String addr) {
-        // 리턴을 받는 문서가 굉장히 길 수 있으므로 StringBuilder를 사용하는 것이 효율적이다.
-        StringBuilder html = new StringBuilder();
-        try {
-            // 인수로 전달받은 주소로부터 URL객체를 생성한다.
-            URL url = new URL(addr);
-            // openConnection 메서드로 연결
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            if (connection != null) {
-                // 연결 타임아웃을 10초로 지정
-                connection.setConnectTimeout(10000);
-                // 캐쉬는 사용하지 않음
-                connection.setUseCaches(false);
-                // getResponseCode 메서드로 요청을 보내고요청이 정상적으로 리턴되면
-                if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
-                    // 입력 스트림으로부터 버퍼리더로 HTML 문서를 읽어들인다.
-                    BufferedReader br = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-                    for (; ; ) {
-                        String line = br.readLine();    // readLine 메서드는 줄 단위로 읽되 개행 코드는 읽지 않는다.
-                        if (line == null) {
-                            break;
-                        }
-                        html.append(line + '\n');
-                    }
-                    br.close();
-                }
-                connection.disconnect();
-            }
-        } catch (NetworkOnMainThreadException e) {
-            return "Error : 메인 스레드 네트워크 작업 에러- " + e.getMessage();
-        } catch (Exception e) {
-            return "Error : " + e.getMessage();
+
+    private class DownThread extends Thread {
+        String addr;
+
+        DownThread(String addr) {
+            this.addr = addr;
         }
-        return html.toString();
+
+        public void run() {
+            // 인자로 받은 주소의 HTML 문서를 다운로드 받는 메서드 호출
+            String result = DownloadHtml.downloadHtml(addr);
+            /* 스레드는 메인스레드의 위젯을 직접 건드릴 수 없기 때문에 반드시 핸드러로 메시지를 보내야 한다.
+            다운로드가 완료되면 결과를 메시지의 obj에 실어 핸들러로 보내고 스레드는 종료시킨다. */
+            Message message = mAfterDown.obtainMessage();
+            message.obj = result;
+            mAfterDown.sendMessage(message);
+        }
     }
+
+
+    Handler mAfterDown = new Handler() {
+        public void handleMessage(Message msg) {
+            // 프로그래스 대화상자를 닫는다.
+            progressDialog.dismiss();
+            // 다운로드 받은 응답결과를 텍스트 뷰에 출력한다.
+            TextView result = (TextView) findViewById(R.id.result);
+            result.setText(msg.obj + "");
+        }
+    };
 }
